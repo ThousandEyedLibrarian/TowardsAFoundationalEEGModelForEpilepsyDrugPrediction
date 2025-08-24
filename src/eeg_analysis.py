@@ -649,14 +649,16 @@ class EEGAnalyzer:
                 f.write("\nBand Power Statistics (averaged across channels):\n")
                 for band in self.config.freq_bands.keys():
                     values = self.features['band_powers'][band]
-                    f.write(f"  {band:8s}: mean={values.mean():.4f}, std={values.std():.4f}\n")
+                    # Use scientific notation for small values
+                    f.write(f"  {band:8s}: mean={values.mean():.2e}, std={values.std():.2e}\n")
             
             if 'temporal' in self.features:
                 f.write("\nTemporal Feature Statistics (averaged across channels):\n")
                 for col in ['mean', 'std', 'rms', 'hjorth_mobility']:
                     if col in self.features['temporal'].columns:
                         values = self.features['temporal'][col]
-                        f.write(f"  {col:20s}: mean={values.mean():.4f}, std={values.std():.4f}\n")
+                        # Use scientific notation for small values
+                        f.write(f"  {col:20s}: mean={values.mean():.2e}, std={values.std():.2e}\n")
             
             f.write("\n" + "=" * 50 + "\n")
             f.write("Analysis completed successfully\n")
