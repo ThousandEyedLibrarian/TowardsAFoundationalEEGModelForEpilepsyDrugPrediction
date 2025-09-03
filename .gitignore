@@ -1,4 +1,7 @@
 __pycache__
+.DS_Store
+CLAUDE.md
+.claude
 results/*
 detailed_results/*
 *results/*
