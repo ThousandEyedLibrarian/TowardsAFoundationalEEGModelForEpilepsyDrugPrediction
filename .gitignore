@@ -5,3 +5,7 @@ CLAUDE.md
 results/*
 detailed_results/*
 *results/*
+logs/
+eeg-pretraining/
+archive/
+data/
