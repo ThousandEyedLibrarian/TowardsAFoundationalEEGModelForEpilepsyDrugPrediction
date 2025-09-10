@@ -1,6 +1,6 @@
 """
-Enhanced EEG Challenge 2025 - S4 Model Solution
-Enhanced implementation with full S4 block, cross-paradigm transfer learning, and domain adaptation
+Enhanced EEG Challenge 2025 Task 1 - S4 Model Solution
+Implementation with full S4 block, cross-paradigm transfer learning, and domain adaptation
 """
 
 import torch
@@ -1534,7 +1534,7 @@ def main(use_local_data=True, data_dir="data", task=None, enable_logging=True):
     
     if not data_loaded:
         print("\n" + "=" * 60)
-        print("✗ ERROR: No EEG data available for training!")
+        print("ERROR: No EEG data available for training!")
         print("=" * 60)
         print("\nTo get data, you have two options:")
         print("\n1. Add local .set files:")
@@ -1820,11 +1820,11 @@ def main(use_local_data=True, data_dir="data", task=None, enable_logging=True):
     
     summary = f"""
 {'='*70}
-EEG CHALLENGE 2025 - ENHANCED S4 MODEL SUMMARY
+EEG CHALLENGE 2025 TASK 1 - S4 MODEL SUMMARY
 {'='*70}
 
 MODEL ARCHITECTURE:
-- Architecture: Enhanced S4 with Domain Adaptation
+- Architecture: S41D with Domain Adaptation
 - Input Shape: 129 EEG channels × 200 time points (2s @ 100Hz)
 - Hidden Dimension: 128
 - S4 Layers: 4 (with FFT-based convolution)
@@ -1856,15 +1856,6 @@ PERFORMANCE METRICS:
 - Test R²: {test_results['r2']:.6f}
 - Number of Test Samples: {len(test_results['predictions'])}
 
-KEY FEATURES:
-✓ Enhanced S4 temporal modeling
-✓ Domain adaptation for cross-paradigm transfer
-✓ Multi-head attention for temporal pooling
-✓ Gradient reversal for domain-invariant features
-✓ Stimulus-locked epoching (+0.5s shift)
-✓ Subject-level train/val/test splits
-✓ Comprehensive logging and visualization
-
 EXPERIMENT INFO:
 - Timestamp: {datetime.datetime.now().isoformat()}
 - Device: {device}
@@ -1882,9 +1873,7 @@ EXPERIMENT INFO:
     if logger:
         logging.info(f"Model summary saved to: {summary_path}")
     
-    # ========================================
-    # Section 7: Challenge Submission Preparation
-    # ========================================
+    # Challenge Submission Preparation
     
     print("\n" + "="*60)
     print("CHALLENGE SUBMISSION PREPARATION")
@@ -1950,14 +1939,14 @@ EXPERIMENT INFO:
     submission_model.s4_model.load_state_dict(model.state_dict())
     submission_model.eval()
     
-    print("✓ Submission model created and weights loaded")
+    print("Submission model created and weights loaded")
     
     # Test submission model format
     dummy_input = torch.randn(4, 129, 200).to(device)  # Batch of 4 samples
     with torch.no_grad():
         test_output = submission_model.predict(dummy_input)
     
-    print(f"✓ Submission format test - Input: {dummy_input.shape}, Output: {test_output.shape}")
+    print(f"Submission format test - Input: {dummy_input.shape}, Output: {test_output.shape}")
     assert test_output.shape == (4,), f"Expected output shape (4,), got {test_output.shape}"
     
     # Save submission model
@@ -1977,7 +1966,7 @@ EXPERIMENT INFO:
     }
     
     torch.save(submission_checkpoint, submission_model_path)
-    print(f"✓ Submission model saved to: {submission_model_path}")
+    print(f"Submission model saved to: {submission_model_path}")
     
     if logger:
         logging.info(f"Submission model saved to: {submission_model_path}")
