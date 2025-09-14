@@ -22,6 +22,14 @@ import datetime
 import logging
 import sys
 
+# TensorBoard support (optional)
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    TENSORBOARD_AVAILABLE = True
+except ImportError:
+    TENSORBOARD_AVAILABLE = False
+    print("Warning: TensorBoard not available. Install with: pip install tensorboard")
+
 # EEG data handling imports
 try:
     from eegdash.dataset import EEGChallengeDataset
@@ -55,14 +63,18 @@ print(f"Using device: {device}")
 class ExperimentLogger:
     """Comprehensive logging for EEG S4 model experiments"""
     
-    def __init__(self, log_dir: str = "logs", experiment_name: Optional[str] = None):
+    def __init__(self, log_dir: str = "logs", experiment_name: Optional[str] = None, 
+                 enable_tensorboard: bool = False, tensorboard_dir: str = "runs"):
         """Initialize experiment logger
         
         Args:
             log_dir: Base directory for logs
             experiment_name: Name for this experiment (auto-generated if None)
+            enable_tensorboard: Whether to enable TensorBoard logging
+            tensorboard_dir: Directory for TensorBoard logs
         """
         self.log_dir = Path(log_dir)
+        self.enable_tensorboard = enable_tensorboard and TENSORBOARD_AVAILABLE
         
         # Create experiment-specific directory with timestamp
         if experiment_name is None:
@@ -78,6 +90,15 @@ class ExperimentLogger:
         
         self.checkpoints_dir = self.experiment_dir / "checkpoints"
         self.checkpoints_dir.mkdir(exist_ok=True)
+        
+        # Initialize TensorBoard writer if enabled
+        self.writer = None
+        if self.enable_tensorboard:
+            tensorboard_log_dir = Path(tensorboard_dir) / experiment_name
+            self.writer = SummaryWriter(tensorboard_log_dir)
+            logging.info(f"TensorBoard logging enabled: {tensorboard_log_dir}")
+            print(f"TensorBoard logging to: {tensorboard_log_dir}")
+            print(f"Run 'tensorboard --logdir={tensorboard_dir}' to visualize")
         
         # Initialize logging
         self.setup_logging()
@@ -103,7 +124,8 @@ class ExperimentLogger:
         self.experiment_info = {
             'start_time': datetime.datetime.now().isoformat(),
             'device': str(device),
-            'experiment_name': experiment_name
+            'experiment_name': experiment_name,
+            'tensorboard_enabled': self.enable_tensorboard
         }
         
         logging.info(f"Experiment logger initialized: {self.experiment_dir}")
@@ -170,6 +192,10 @@ class ExperimentLogger:
             metric_name = f"{phase}_{key}"
             if metric_name in self.metrics:
                 self.metrics[metric_name].append(value)
+            
+            # Log to TensorBoard if enabled
+            if self.writer:
+                self.writer.add_scalar(f'{key}/{phase}', value, epoch)
         
         # Log to console/file
         log_msg = f"Epoch {epoch} [{phase}]: "
@@ -317,6 +343,12 @@ class ExperimentLogger:
                 best_path = self.checkpoints_dir / "best_model.pt"
                 torch.save(checkpoint, best_path)
                 logging.info(f"Best model saved at epoch {epoch}")
+    
+    def close(self):
+        """Close TensorBoard writer and cleanup"""
+        if self.writer:
+            self.writer.close()
+            logging.info("TensorBoard writer closed")
 
 # ================================
 # Enhanced S4 Implementation (1D)
@@ -1349,7 +1381,8 @@ class LocalEEGDataset(Dataset):
 # Main Training Pipeline
 # ========================================
 
-def main(use_local_data=True, data_dir="data", task=None, enable_logging=True):
+def main(use_local_data=True, data_dir="data", task=None, enable_logging=True, 
+         enable_tensorboard=False, tensorboard_dir="runs"):
     """Main training pipeline for enhanced EEG S4 model
     
     Args:
@@ -1357,6 +1390,8 @@ def main(use_local_data=True, data_dir="data", task=None, enable_logging=True):
         data_dir: Directory containing .set files (default: "data")
         task: Optional task filter (e.g., 'contrastChangeDetection'). If None, uses all .set files
         enable_logging: If True, logs all metrics to files (default: True)
+        enable_tensorboard: If True, enables TensorBoard visualization (default: False)
+        tensorboard_dir: Directory for TensorBoard logs (default: "runs")
     """
     
     print("Starting Enhanced EEG Challenge 2025 - S4 Model Training")
@@ -1365,8 +1400,21 @@ def main(use_local_data=True, data_dir="data", task=None, enable_logging=True):
     # Initialize experiment logger if enabled
     logger = None
     if enable_logging:
-        logger = ExperimentLogger(log_dir="logs")
+        logger = ExperimentLogger(
+            log_dir="logs",
+            enable_tensorboard=enable_tensorboard,
+            tensorboard_dir=tensorboard_dir
+        )
         logging.info("Enhanced EEG Challenge 2025 - S4 Model Training Started")
+        
+        if enable_tensorboard and TENSORBOARD_AVAILABLE:
+            print(f"\n✅ TensorBoard enabled!")
+            print(f"To view real-time training metrics, run in a new terminal:")
+            print(f"  tensorboard --logdir={tensorboard_dir}")
+            print(f"Then open http://localhost:6006 in your browser\n")
+        elif enable_tensorboard and not TENSORBOARD_AVAILABLE:
+            print("\n⚠️  TensorBoard requested but not installed.")
+            print("Install with: pip install tensorboard\n")
     
     # Data directory - now uses the data/ folder by default
     DATA_DIR = Path(data_dir)
@@ -2028,6 +2076,11 @@ predictions = model.predict(X)  # Response time predictions
     
     print("\nModel is ready for EEG Challenge 2025 submission!")
     print("="*60)
+    
+    # Clean up logger resources
+    if logger:
+        logger.close()
+        logging.info("Training pipeline completed and resources cleaned up")
 
 if __name__ == "__main__":
     import sys
@@ -2046,6 +2099,10 @@ if __name__ == "__main__":
                         help="Don't use local data files")
     parser.add_argument("--no-logging", action="store_true",
                         help="Disable comprehensive logging to files")
+    parser.add_argument("--tensorboard", action="store_true",
+                        help="Enable TensorBoard visualization for real-time metric tracking")
+    parser.add_argument("--tensorboard-dir", type=str, default="runs",
+                        help="Directory for TensorBoard logs (default: runs)")
     
     args = parser.parse_args()
     
@@ -2062,4 +2119,6 @@ if __name__ == "__main__":
     main(use_local_data=use_local,
          data_dir=args.data_dir,
          task=args.task,
-         enable_logging=enable_logging)
+         enable_logging=enable_logging,
+         enable_tensorboard=args.tensorboard,
+         tensorboard_dir=args.tensorboard_dir)

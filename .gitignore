@@ -9,3 +9,6 @@ logs/
 eeg-pretraining/
 archive/
 data/
+lightning_logs/
+runs/
+checkpoints/
