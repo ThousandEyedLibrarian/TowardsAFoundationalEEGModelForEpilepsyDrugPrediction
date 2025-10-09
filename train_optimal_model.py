@@ -649,7 +649,7 @@ class TrainingPipeline:
         # Calculate file sizes
         zip_size = zip_path.stat().st_size / (1024 * 1024)
 
-        print(f"\n✅ Submission package created: {zip_path}")
+        print(f"\nSubmission package created: {zip_path}")
         print(f"   Size: {zip_size:.2f} MB")
         print(f"   Contents:")
         print(f"     - submission.py")
@@ -714,22 +714,11 @@ def main():
         config.MODEL_CONFIG = config.SPATIAL_MODEL_CONFIG
         print("\n" + "="*70)
         print("SELECTED MODEL: Spatial S4D (EEG-specific architecture)")
-        print("-"*70)
-        print("Features:")
-        print("  - Spatial channel extraction with attention")
-        print("  - Frequency band decomposition")
-        print("  - Response-time focused attention")
-        print("  - Parameters: ~283K (37% smaller than original)")
         print("="*70)
     else:
         config.MODEL_CONFIG = config.ORIGINAL_MODEL_CONFIG
         print("\n" + "="*70)
         print("SELECTED MODEL: Original Optimised S4D")
-        print("-"*70)
-        print("Features:")
-        print("  - Bidirectional S4D blocks")
-        print("  - Multi-head attention pooling")
-        print("  - Parameters: ~453K")
         print("="*70)
 
     # Initialise pipeline
@@ -742,9 +731,9 @@ def main():
         # Create submission if requested
         if not args.no_submission:
             submission_path = pipeline.create_submission(model_weights)
-            print(f"\n🎉 Training complete! Submission ready at: {submission_path}")
+            print(f"\nTraining complete! Submission ready at: {submission_path}")
         else:
-            print("\n🎉 Training complete!")
+            print("\nTraining complete!")
 
         # Final summary
         print("\n" + "="*70)
@@ -756,7 +745,7 @@ def main():
         print("="*70)
 
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\nError: {e}")
         sys.exit(1)
 
 
