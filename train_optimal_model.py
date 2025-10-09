@@ -436,7 +436,7 @@ class OptimalS4DLightning(pl.LightningModule):
             train_trend = recent_train[-1] - recent_train[0]
 
             if val_trend > 0.02 and train_trend < 0:
-                print(f"\n⚠️  Warning: Validation diverging "
+                print(f"\n[WARNING] Validation diverging "
                       f"(val: +{val_trend:.4f}, train: {train_trend:.4f})")
 
 

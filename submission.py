@@ -255,12 +255,12 @@ class Submission:
                 # PyTorch 2.6 compatibility: explicitly set weights_only=False
                 state_dict = torch.load(weights_path, map_location=self.device, weights_only=False)
                 model.load_state_dict(state_dict, strict=False)
-                print(f"✅ Loaded weights for Challenge 1 from {weights_path}")
+                print(f"[SUCCESS] Loaded weights for Challenge 1 from {weights_path}")
             except Exception as e:
-                print(f"⚠️ Could not load weights for Challenge 1: {e}")
+                print(f"[WARNING] Could not load weights for Challenge 1: {e}")
                 print("   Using random initialization")
         else:
-            print(f"⚠️ No weights found at {weights_path}, using random initialization")
+            print(f"[WARNING] No weights found at {weights_path}, using random initialization")
 
         # Set to evaluation mode
         model.eval()
@@ -283,12 +283,12 @@ class Submission:
                 # PyTorch 2.6 compatibility: explicitly set weights_only=False
                 state_dict = torch.load(weights_path, map_location=self.device, weights_only=False)
                 model.load_state_dict(state_dict, strict=False)
-                print(f"✅ Loaded weights for Challenge 2 from {weights_path}")
+                print(f"[SUCCESS] Loaded weights for Challenge 2 from {weights_path}")
             except Exception as e:
-                print(f"⚠️ Could not load weights for Challenge 2: {e}")
+                print(f"[WARNING] Could not load weights for Challenge 2: {e}")
                 print("   Using random initialization")
         else:
-            print(f"⚠️ No weights found at {weights_path}, using random initialization")
+            print(f"[WARNING] No weights found at {weights_path}, using random initialization")
 
         # Set to evaluation mode
         model.eval()
@@ -346,8 +346,8 @@ if __name__ == "__main__":
         y_pred = model_2.forward(X)
 
     print(f"  Output shape: {y_pred.shape}")
-    print(f"  ✅ Model outputs correct shape (batch, 1)")
+    print(f"  [SUCCESS] Model outputs correct shape (batch, 1)")
 
     print("\n" + "="*60)
-    print("✅ Submission test passed! Ready for competition.")
+    print("[SUCCESS] Submission test passed! Ready for competition.")
     print("="*60)
