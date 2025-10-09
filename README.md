@@ -1,347 +1,205 @@
-# EEG S4 Model for Foundation Model Development
+# EEG Challenge 2025 - S4D Model Submission
 
-## Project Overview
-
-This repository contains the PyTorch Lightning implementation of an S4 (Structured State Space) model for EEG signal analysis, developed as part of the EEG Foundation Model research at Monash University. The model is designed for the NeurIPS 2025 EEG Challenge and broader epilepsy drug response prediction research.
-
-## Table of Contents
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Model Architecture](#model-architecture)
-- [Data Management](#data-management)
-- [Training](#training)
-- [Hyperparameter Optimisation](#hyperparameter-optimisation)
-- [Competition Submission](#competition-submission)
-- [Advanced Usage](#advanced-usage)
-- [Project Structure](#project-structure)
-- [Citation](#citation)
-
-## Installation
-
-### Requirements
-- Python 3.8+
-- CUDA-capable GPU (recommended)
-- 16GB+ RAM
-
-### Dependencies
-```bash
-pip install torch pytorch-lightning
-pip install mne braindecode eegdash
-pip install optuna  # For hyperparameter optimisation
-pip install joblib  # For parallel data loading
-```
+Optimised S4D (Structured State Space) model for EEG response time prediction in Challenge 1: Cross-Task Transfer Learning.
 
 ## Quick Start
 
-### Basic Training
+### 1. Train the Model
 ```bash
-# Train with default parameters
-python3 eeg_s4_lightning.py
-
-# Train with custom configuration
-python3 eeg_s4_lightning.py --epochs 100 --batch-size 64 --lr 1e-3
-
-# Use mini dataset for quick testing
-python3 eeg_s4_lightning.py --force-eegdash --use-mini --epochs 10
+python3 train_improved_final.py --data_dir local_eeg_data.npz --use_npz --epochs 100
 ```
 
-### Download Full Dataset
+### 2. Create Submission
 ```bash
-# Download and train on complete EEG Challenge dataset
-python3 eeg_s4_lightning.py --download-full --epochs 100
+python3 prepare_final_submission.py
 ```
+
+### 3. Upload
+Upload `submission_s4_final.zip` to the EEG Challenge 2025 platform.
+
+## Repository Structure
+
+### Core Files
+- **`submission.py`** - Competition submission with S4D model
+- **`prepare_final_submission.py`** - Package model and weights for submission
+- **`train_improved_final.py`** - Training script with regularisation and augmentation
+
+### Data Files
+- **`local_eeg_data.npz`** - Local CCD data (1,876 samples, 2 subjects)
+- **`weights_challenge_*.pt`** - Trained model weights
+
+### Data Preparation
+- **`download_r5_efficient.py`** - Download R5 dataset from EEGDash
+- **`download_r5_simple.py`** - Alternative R5 downloader
+- **`load_local_eeg_data.py`** - Load archived local EEG data
+
+### Documentation
+- **`README.md`** - This file
+- **`CLAUDE.md`** - Project context for AI assistant
+- **`TRAINING_STATUS.md`** - Training status and details
 
 ## Model Architecture
 
-The S4 model implements a structured state space architecture optimised for EEG time series:
+### S4D Implementation
+- **Input**: 129 channels × 200 timepoints (2 seconds at 100Hz)
+- **Architecture**:
+  - Input projection: Linear(129, 128) + LayerNorm
+  - 4× S4D blocks with FFT convolution
+  - First block: Bidirectional (outputs 256 dims)
+  - Blocks 2-4: Maintain 256 dims
+  - Multi-head attention pooling (8 heads, CLS token)
+  - Output head: Linear(256, 64) → ReLU → Dropout → Linear(64, 1)
+- **Parameters**: 958,721
+- **Output**: Response time prediction (batch, 1)
 
-- **Input**: 129 EEG channels × 200 time points (2 seconds @ 100Hz)
-- **Backbone**: 4-8 S4 layers with residual connections
-- **State Dimension**: Configurable (default: 64)
-- **Pooling**: Multi-head attention with CLS token
-- **Output**: Response time predictions or classification
+### Key Features
+- S4D without HiPPO initialisation (diagonal state space)
+- FFT-based efficient convolution
+- Bidirectional processing
+- Multi-head attention aggregation
+- Competition format compliant
 
-### Key Components
-1. **S4 Kernel**: HiPPO-initialised state space model
-2. **Enhanced Stability**: Bilinear discretisation and gradient clipping
-3. **Domain Adaptation**: Optional gradient reversal layers
-4. **Flexible Architecture**: Configurable depth and width
+## Training Configuration
 
-## Data Management
+### Hyperparameters
+- **Optimiser**: AdamW (lr=0.001, weight_decay=0.0001)
+- **Scheduler**: CosineAnnealingWarmRestarts (T_0=10, T_mult=2)
+- **Batch size**: 32
+- **Epochs**: 100 (with early stopping, patience=20)
+- **Dropout**: 0.15
+- **Label smoothing**: 0.05
 
-The system implements intelligent data loading with three priority levels:
+### Data Augmentation
+- Gaussian noise (50% prob, 0-1% level)
+- Channel dropout (30% prob, 1-5 channels)
+- Time shift (30% prob, ±5 samples)
+- Amplitude scaling (40% prob, 0.8-1.2×)
 
-### Data Loading Priority
-1. **Local Data**: Automatically detects and uses `.set` files in `--data-dir`
-2. **Mini Dataset**: Quick testing dataset from EEGDash
-3. **Full Dataset**: Complete challenge dataset with parallel downloading
+### Test-Time Augmentation
+- 5× predictions with small noise, averaged for final prediction
 
-### Data Configuration
+## Performance
+
+### Local Validation
+- **Dataset**: 1,876 samples from 2 subjects
+- **Splits**: 1,314 train / 187 val / 375 test (random split)
+
+### Competition Results
+- **Previous submission**: 1.59 RMSE
+- **Limitation**: Small dataset (only 2 subjects)
+
+## Data Requirements
+
+### Input Format
+- **Shape**: (batch, 129, 200)
+- **Channels**: 129 EEG channels
+- **Timepoints**: 200 (2 seconds at 100Hz)
+- **Preprocessing**: None (raw data)
+
+### Label Format
+- **Shape**: (batch, 1)
+- **Values**: Response time in seconds
+- **Range**: Typically 0.2-2.0 seconds
+
+## Training with Different Data Sources
+
 ```bash
-# Use local data (default)
-python3 eeg_s4_lightning.py --data-dir /path/to/local/data
+# Local archived data (default)
+python3 train_improved_final.py --data_dir local_eeg_data.npz --use_npz
 
-# Force EEGDash mini dataset
-python3 eeg_s4_lightning.py --force-eegdash --use-mini
+# Downloaded R5 data (directory format)
+python3 train_improved_final.py --data_dir r5_data
 
-# Download full dataset
-python3 eeg_s4_lightning.py --download-full --eegdash-release R5
+# Downloaded R5 data (npz format)
+python3 train_improved_final.py --data_dir r5_processed.npz --use_npz
+
+# Synthetic data (testing only)
+python3 train_improved_final.py --use_synthetic
 ```
 
-## Training
+## Downloading R5 Dataset (Optional)
 
-### Standard Training
 ```bash
-# Basic training with validation
-python3 eeg_s4_lightning.py \
-    --epochs 50 \
-    --batch-size 32 \
-    --lr 1e-3 \
-    --weight-decay 1e-4
+# Batch processing (individual subject files)
+python3 download_r5_efficient.py --mini --save_dir r5_data
+
+# Challenge notebook approach (single .npz file)
+python3 download_r5_simple.py --mini --output r5_processed.npz
 ```
 
-### Advanced Training Options
-```bash
-# Production training with all optimisations
-python3 eeg_s4_lightning.py \
-    --epochs 100 \
-    --batch-size 64 \
-    --d-model 256 \
-    --n-layers 6 \
-    --d-state 128 \
-    --dropout 0.2 \
-    --gradient-clip 0.5 \
-    --mixed-precision \
-    --accumulate-grad-batches 2 \
-    --patience 15 \
-    --experiment-name production_run
+Note: EEGDash downloads require stable internet and may take significant time.
+
+## Submission Format
+
+The submission package contains:
+```
+submission_s4_final.zip
+├── submission.py          # Model implementation with Submission class
+├── weights_challenge_1.pt # Trained weights for Challenge 1
+└── weights_challenge_2.pt # Trained weights for Challenge 2
 ```
 
-### Resume Training
-```bash
-# Resume from checkpoint
-python3 eeg_s4_lightning.py \
-    --resume-from checkpoints/last.ckpt \
-    --epochs 50
-```
+**Important**: Files must be at zip root level (no folder structure).
 
-### Test Only Mode
-```bash
-# Evaluate saved model
-python3 eeg_s4_lightning.py \
-    --test-only \
-    --resume-from checkpoints/best.ckpt
-```
+## Competition Compliance
 
-## Hyperparameter Optimisation
-
-The system includes Optuna-based Bayesian optimisation for efficient hyperparameter search.
-
-### Basic Hyperparameter Search
-```bash
-# Run 50 trials of hyperparameter optimisation
-python3 eeg_s4_lightning.py \
-    --optuna-trials 50 \
-    --hpo-epochs 20 \
-    --optuna-study-name eeg_optimisation
-```
-
-### Advanced Optimisation with Storage
-```bash
-# Persistent optimisation study with pruning
-python3 eeg_s4_lightning.py \
-    --optuna-trials 100 \
-    --optuna-storage sqlite:///optuna.db \
-    --optuna-study-name production_hpo \
-    --optuna-pruning \
-    --hpo-epochs 30 \
-    --hpo-metric val/mae \
-    --hpo-direction minimize
-```
-
-### Resume Optimisation Study
-```bash
-# Continue previous study
-python3 eeg_s4_lightning.py \
-    --optuna-trials 50 \
-    --optuna-storage sqlite:///optuna.db \
-    --optuna-study-name production_hpo
-```
-
-### Hyperparameters Optimised
-- Learning rate (1e-5 to 1e-2, log scale)
-- Batch size (16, 32, 64, 128)
-- Model dimension (64, 128, 256, 512)
-- Number of layers (2-8)
-- State dimension (16, 32, 64, 128)
-- Dropout rate (0.0-0.5)
-- Weight decay (1e-6 to 1e-3, log scale)
-- Huber loss delta (0.05-0.5)
-
-## Competition Submission
-
-### Save Model for Competition
-```bash
-# Train and save submission model
-python3 eeg_s4_lightning.py \
-    --epochs 100 \
-    --save-submission \
-    --submission-path competition_model.pth
-```
-
-### Submission Files Generated
-1. **Model weights** (`.pth`): Competition submission file
-2. **Full model** (`.full.pth`): Complete model with metadata
-3. **Loading script** (`.load.py`): Standalone inference script
-
-### Verify Submission Model
+### Required Interface
 ```python
-# Load and test submission model
-from eeg_s4_lightning import EEGChallengeSubmissionModel, LightningEEGS4Model
+class Submission:
+    def __init__(self, SFREQ, DEVICE):
+        pass
 
-# Load model
-model = torch.load('competition_model.pth')
-model.eval()
+    def get_model_challenge_1(self):
+        # Loads weights from /app/output/weights_challenge_1.pt
+        pass
 
-# Test inference
-dummy_input = torch.randn(1, 129, 200)
-output = model(dummy_input)
+    def get_model_challenge_2(self):
+        # Loads weights from /app/output/weights_challenge_2.pt
+        pass
 ```
 
-## Advanced Usage
-
-### Learning Rate Finding
-```bash
-# Automatically find optimal learning rate
-python3 eeg_s4_lightning.py --find-lr --epochs 100
-```
-
-### Automatic Batch Size Scaling
-```bash
-# Find maximum batch size for GPU
-python3 eeg_s4_lightning.py --auto-batch-size
-```
-
-### Mixed Precision Training
-```bash
-# Use automatic mixed precision for 2x speedup
-python3 eeg_s4_lightning.py --mixed-precision --precision 16-mixed
-```
-
-### Multi-GPU Training
-```bash
-# Distributed training across GPUs
-python3 eeg_s4_lightning.py --gpus 2 --accelerator gpu
-```
-
-### Debug Mode
-```bash
-# Quick debugging with reduced data
-python3 eeg_s4_lightning.py --debug --epochs 2
-```
-
-## Project Structure
-
-```
-project/
-├── eeg_s4_lightning.py           # Main training script
-├── data/                         # Data directory
-│   ├── ds*/                     # BIDS structure datasets
-│   └── *.set                    # EEG files
-├── checkpoints/                  # Model checkpoints
-│   ├── best.ckpt
-│   └── last.ckpt
-├── optuna_checkpoints/          # HPO trial checkpoints
-├── lightning_logs/              # Training logs
-│   ├── tensorboard/
-│   └── csv_logs/
-└── results/                     # Experiment results
-    ├── final_results.json
-    └── optimisation_results.json
-```
-
-## Command-Line Arguments
-
-### Key Parameters
-
-| Parameter      | Default | Description               |
-|----------------|---------|---------------------------|
-| `--epochs`     | 50      | Number of training epochs |
-| `--batch-size` | 32      | Training batch size       |
-| `--lr`         | 1e-3    | Learning rate             |
-| `--d-model`    | 128     | Hidden dimension size     |
-| `--n-layers`   | 4       | Number of S4 layers       |
-| `--d-state`    | 64      | S4 state dimension        |
-| `--dropout`    | 0.1     | Dropout rate              |
-| `--patience`   | 10      | Early stopping patience   |
-
-### Data Arguments
-
-| Parameter           | Description                                    |
-|---------------------|------------------------------------------------|
-| `--data-dir`        | Directory for data storage/loading             |
-| `--download-full`   | Download complete dataset from EEGDa           |
-| `--force-eegdash`   | Force use of EEGDash even if local data exists |
-| `--use-mini`        | Use mini dataset for testing                   |
-| `--eegdash-release` | Dataset version (default: R5)                  |
-
-### Optimisation Arguments
-
-| Parameter             | Description                         |
-|-----------------------|-------------------------------------|
-| `--optuna-trials`     | Number of optimisation trials       |
-| `--optuna-study-name` | Name for optimisation study         |
-| `--optuna-storage`    | Database URL for persistent studies |
-| `--optuna-pruning`    | Enable trial pruning                |
-| `--hpo-epochs`        | Epochs per optimisation trial       |
-| `--hpo-metric`        | Metric to optimise                  |
-
-## Performance Benchmarks
-
-| Configuration   | MAE   | RMSE  | Training Time |
-|-----------------|-------|-------|---------------|
-| Baseline (mini) | 0.32s | 0.41s | 5 min         |
-| Optimised (mini)| 0.28s | 0.36s | 8 min         |
-| Full dataset    | 0.24s | 0.31s | 2 hours       |
-| Production      | 0.21s | 0.28s | 4 hours       |
+### Evaluation
+- Platform instantiates: `Submission(SFREQ=100, DEVICE)`
+- Calls: `get_model_challenge_1()` or `get_model_challenge_2()`
+- Runs inference with `torch.inference_mode()`
+- Evaluates RMSE on secret test sets
 
 ## Troubleshooting
 
-### Out of Memory
+### No weights found
 ```bash
-# Reduce batch size or use gradient accumulation
-python3 eeg_s4_lightning.py --batch-size 16 --accumulate-grad-batches 4
+python3 train_improved_final.py --data_dir local_eeg_data.npz --use_npz --epochs 100
 ```
 
-### Slow Training
+### Out of memory
 ```bash
-# Enable optimisations
-python3 eeg_s4_lightning.py --mixed-precision --num-workers 4
+python3 train_improved_final.py --batch_size 16
 ```
 
-### No Data Found
-```bash
-# Force download mini dataset
-python3 eeg_s4_lightning.py --force-eegdash --use-mini
-```
+### Wrong data format
+- Input must be (batch, 129, 200)
+- Output must be (batch, 1)
+- Check submission.py model forward pass
 
-## Citation
+## Archive
 
-If you use this code in your research, please cite:
+Old scripts and documentation in `archive/`:
+- `archive/old_scripts/` - Previous training and submission variations
+- `archive/old_docs/` - Previous documentation versions
+- `archive/old_weights/` - Previous model weights
+- `archive/windowed_epochs/` - Original preprocessed data
 
-```bibtex
-@article{s4model,
-  title={Efficiently Modeling Long Sequences with Structured State Spaces},
-  author={Gu et al.},
-  journal={ICLR},
-  year={2022}
-}
-```
+## References
+
+- **Competition**: EEG Challenge 2025 (NeurIPS 2025)
+- **Task**: Challenge 1 - Cross-Task Transfer Learning
+- **Dataset**: HBN-EEG Contrast Change Detection (CCD)
+- **Model**: S4D (Structured State Space with Diagonal parameterisation)
 
 ## Licence
 
-This project is licensed under the MIT License. See LICENSE file for details.
+This code is for the EEG Challenge 2025 competition. See competition rules for usage terms.
 
-## Contact
+---
 
-For questions or issues, please open a GitHub issue or contact the maintainer.
+**Last Updated**: October 2025

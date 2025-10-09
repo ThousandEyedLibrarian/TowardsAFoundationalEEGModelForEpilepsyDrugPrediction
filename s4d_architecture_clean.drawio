@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="5.0" version="21.0.0" etag="s4d_eeg_clean">
+  <diagram name="S4D-Architecture" id="s4d-clean">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" background="#ffffff">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Input -->
+        <mxCell id="input" value="Input&#xa;(batch, 129, 200)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="350" y="40" width="150" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Transpose -->
+        <mxCell id="transpose" value="Transpose&#xa;(batch, 200, 129)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="350" y="110" width="150" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Input Projection -->
+        <mxCell id="proj" value="Linear(129, 128)&#xa;LayerNorm(128)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="350" y="180" width="150" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- S4D Blocks Container -->
+        <mxCell id="s4d_container" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;strokeWidth=2;dashed=1;" parent="1" vertex="1">
+          <mxGeometry x="280" y="250" width="290" height="320" as="geometry" />
+        </mxCell>
+
+        <!-- S4D Blocks Label -->
+        <mxCell id="s4d_label" value="S4D Blocks ×4" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="360" y="260" width="130" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- S4DBlock Structure -->
+        <mxCell id="s4d_block" value="S4DBlock" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="300" y="290" width="250" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- S4D Layer -->
+        <mxCell id="s4d_layer" value="S4D Layer&#xa;• S4DKernel (forward)&#xa;• S4DKernel (backward) if bidirectional&#xa;• FFT Convolution&#xa;• Skip connection (D parameter)&#xa;• GELU → Dropout&#xa;• Conv1d → GLU" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f9f9f9;strokeColor=#000000;fontSize=10;align=left;spacingLeft=5;" parent="1" vertex="1">
+          <mxGeometry x="310" y="330" width="230" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Residual and Norm -->
+        <mxCell id="residual" value="x = S4D(x) + residual&#xa;LayerNorm" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="310" y="440" width="230" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Output shape after S4D blocks -->
+        <mxCell id="s4d_out" value="Output: (batch, 200, 256)&#xa;if bidirectional else (batch, 200, 128)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontSize=11;fontStyle=2;" parent="1" vertex="1">
+          <mxGeometry x="310" y="490" width="230" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Repeat indicator -->
+        <mxCell id="repeat" value="Repeat ×4" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=10;fontStyle=2;" parent="1" vertex="1">
+          <mxGeometry x="380" y="540" width="90" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- Attention Pooling -->
+        <mxCell id="attention" value="Multi-head Attention Pooling&#xa;• CLS token: (1, 1, 256)&#xa;• 8 heads&#xa;• Q: CLS, K/V: all positions&#xa;Output: (batch, 256)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="320" y="600" width="210" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Main Head -->
+        <mxCell id="main_head" value="Main Head&#xa;Linear(256, 64)&#xa;ReLU&#xa;Dropout(0.1)&#xa;Linear(64, 1)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="350" y="710" width="150" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Output -->
+        <mxCell id="output" value="Output&#xa;(batch,)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="350" y="820" width="150" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows -->
+        <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#000000;endArrow=classic;" parent="1" source="input" target="transpose" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#000000;endArrow=classic;" parent="1" source="transpose" target="proj" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#000000;endArrow=classic;" parent="1" source="proj" target="s4d_container" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#000000;endArrow=classic;" parent="1" source="s4d_container" target="attention" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#000000;endArrow=classic;" parent="1" source="attention" target="main_head" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#000000;endArrow=classic;" parent="1" source="main_head" target="output" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- S4DKernel Detail Box -->
+        <mxCell id="kernel_detail" value="S4DKernel Components:&#xa;• A: Diagonal complex matrix&#xa;  - log_A_real: initialized to log(0.5)&#xa;  - A_imag: π × [0,1,...,N/2-1]&#xa;• C: Complex output matrix&#xa;• Δt: log_dt ∈ [dt_min, dt_max]&#xa;• Kernel: K = Vandermonde(A,C,Δt,L)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#666666;fontSize=10;align=left;spacingLeft=5;" parent="1" vertex="1">
+          <mxGeometry x="40" y="290" width="220" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Parameters Box -->
+        <mxCell id="params" value="Parameters:&#xa;n_chans = 129&#xa;n_times = 200&#xa;d_model = 128&#xa;n_layers = 4&#xa;d_state = 64&#xa;bidirectional = True&#xa;dropout = 0.1&#xa;n_heads = 8" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#666666;fontSize=10;align=left;spacingLeft=5;" parent="1" vertex="1">
+          <mxGeometry x="590" y="290" width="120" height="140" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

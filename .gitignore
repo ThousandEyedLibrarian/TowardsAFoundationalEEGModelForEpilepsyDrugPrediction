@@ -7,8 +7,10 @@ detailed_results/*
 *results/*
 logs/
 eeg-pretraining/
+*.npz
 archive/
 data/
 lightning_logs/
 runs/
 checkpoints/
+optimal_model_output/
