@@ -1,5 +1,3 @@
-# EEG Challenge 2025 - S4D Model
-
 ## Quick Start Checklist
 
 ### Setup
