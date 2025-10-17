@@ -98,7 +98,7 @@ class Config:
     }
 
     # Paths
-    DATA_PATH = 'r5_full_data.npz'
+    DATA_PATH = 'r5_full_data.npz'  # Default, can be overridden
     OUTPUT_DIR = Path('optimal_model_output')
     CHECKPOINT_DIR = OUTPUT_DIR / 'checkpoints'
     LOGS_DIR = OUTPUT_DIR / 'logs'
@@ -195,11 +195,15 @@ class EEGDataModule(pl.LightningDataModule):
         self.data_loaded = False
 
     def prepare_data(self):
-        """Check if data exists."""
+        """Check if data exists and validate format."""
         if not Path(self.config.DATA_PATH).exists():
             raise FileNotFoundError(
                 f"Data file not found: {self.config.DATA_PATH}\n"
-                f"Please ensure the R5 dataset is downloaded."
+                f"Please ensure the dataset is available.\n"
+                f"Options:\n"
+                f"  1. Use existing: r5_full_data.npz (1080 samples)\n"
+                f"  2. Use processed BDF: r5_l100_full.npz (large dataset)\n"
+                f"  3. Process BDF files: python3 process_r5_bdf.py"
             )
 
     def setup(self, stage: Optional[str] = None):
@@ -210,14 +214,35 @@ class EEGDataModule(pl.LightningDataModule):
         # Load data
         print(f"Loading data from {self.config.DATA_PATH}...")
         data = np.load(self.config.DATA_PATH, allow_pickle=True)
-        X = data['X']
-        y = data['y']
 
-        print(f"Data shape: X={X.shape}, y={y.shape}")
-        print(f"Response time range: [{y.min():.3f}, {y.max():.3f}] seconds")
+        # Check if pre-split data is available
+        if 'X_train' in data.keys():
+            print("Using pre-split data from file...")
+            self.train_dataset = OptimalEEGDataset(
+                data['X_train'], data['y_train'], augment=True
+            )
+            self.val_dataset = OptimalEEGDataset(
+                data['X_val'], data['y_val'], augment=False
+            )
+            self.test_dataset = OptimalEEGDataset(
+                data['X_test'], data['y_test'], augment=False
+            )
 
-        # Create splits
-        self._create_splits(X, y)
+            print(f"\nData splits loaded from file:")
+            print(f"  Train: {len(data['X_train']):,} samples")
+            print(f"  Val: {len(data['X_val']):,} samples")
+            print(f"  Test: {len(data['X_test']):,} samples")
+            print(f"Response time range: [{data['y'].min():.3f}, {data['y'].max():.3f}] seconds")
+        else:
+            # Create splits from full dataset
+            X = data['X']
+            y = data['y']
+
+            print(f"Data shape: X={X.shape}, y={y.shape}")
+            print(f"Response time range: [{y.min():.3f}, {y.max():.3f}] seconds")
+
+            # Create splits
+            self._create_splits(X, y)
         self.data_loaded = True
 
     def _create_splits(self, X: np.ndarray, y: np.ndarray):
@@ -472,8 +497,8 @@ class TrainingPipeline:
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.benchmark = True
 
     def train(self) -> Dict[str, float]:
         """
@@ -533,7 +558,7 @@ class TrainingPipeline:
             gradient_clip_val=self.config.TRAINING_CONFIG['gradient_clip'],
             precision='16-mixed' if torch.cuda.is_available() else 32,
             enable_progress_bar=True,
-            deterministic=True
+            deterministic=False
         )
 
         # Train
