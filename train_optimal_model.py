@@ -60,8 +60,8 @@ class Config:
     # Original S4D Model Configuration (35% smaller than original to prevent overfitting)
     ORIGINAL_MODEL_CONFIG = {
         'd_model': 96,      # Hidden dimension (was 128)
-        'n_layers': 3,      # Number of S4D layers (was 4)
-        'd_state': 48,      # State dimension (was 64)
+        'n_layers': 3,      # Number of S4D layers (was 4) #FIXME: Go bigger 6, 8, 16, test each
+        'd_state': 48,      # State dimension (was 64) #FIXME: Set to 4x d_model
         'n_heads': 6,       # Attention heads (was 8)
         'bidirectional': True,
         'dropout': 0.22     # Optimal dropout rate from experiments
@@ -70,7 +70,7 @@ class Config:
     # Spatial S4D Model Configuration (EEG-specific architecture)
     SPATIAL_MODEL_CONFIG = {
         'spatial_filters': 36,  # Spatial feature dimension
-        'd_state': 32,          # State dimension for S4D blocks
+        'd_state': 32,          # State dimension for S4D blocks #FIXME: Set to 4x d_model
         'n_layers': 2,          # Fewer layers due to better features
     }
 
@@ -82,13 +82,24 @@ class Config:
     TRAINING_CONFIG = {
         'learning_rate': 4e-4,
         'weight_decay': 0.012,
-        'label_smoothing': 0.08,
-        'mixup_alpha': 0.15,
-        'batch_size': 32,
-        'max_epochs': 40,
+        'batch_size': 32, #
+        'max_epochs': 40, #FIXME: Maybe too low
         'patience': 6,
         'gradient_clip': 0.5
     }
+    
+    #FIXME: eeg_pretraiing pretrain 2d branch base block.py for s4d base block, normalization should be at very end, 
+    # i think i'm doing dropout before any layer normalization when i should be other way round (lines 150 and 149?)
+    # FIXME: set bidirectional to true
+    # FIXME: change num of predicted classes to 1 from 64 at submission.py
+    #FIXME: Re-add huber loss after model fixes and try it again
+    #FIXME: Add the fuseMOE stuff duong sent, set num experts to 16, k to 4, remove num modalities, add to line 174 of
+    # submission.py after pooling and then pass to main_head after
+    # outs, ent_loss = moe(self.pooling)
+    #loss = mse ...
+    #loss = loss + 0.2 * ent_loss
+    #look at mse for val and entropy of training only
+    
 
     # Data Split Ratios
     DATA_CONFIG = {
@@ -173,6 +184,7 @@ class OptimalEEGDataset(Dataset):
                 x = x * scale
 
             # 5. Temporal masking (forces model to use partial information)
+            # FIXME: Remove, good for autoencoders but no necessary for z-score normalization
             if torch.rand(1) < 0.3:
                 mask_len = torch.randint(10, 25, (1,)).item()
                 mask_start = torch.randint(0, 200 - mask_len, (1,)).item()
@@ -307,8 +319,7 @@ class OptimalS4DLightning(pl.LightningModule):
     PyTorch Lightning module implementing the optimal S4D architecture.
 
     Rationale: This module incorporates all successful training strategies
-    identified through experimentation, including MixUp augmentation,
-    label smoothing, and adaptive learning rate scheduling.
+    identified through experimentation incl. adaptive learning rate scheduling.
     """
 
     def __init__(self, config: Config):
@@ -341,43 +352,14 @@ class OptimalS4DLightning(pl.LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
 
-    def _mixup_batch(self, x: torch.Tensor, y: torch.Tensor) -> Tuple:
-        """Apply MixUp augmentation to a batch."""
-        alpha = self.config.TRAINING_CONFIG['mixup_alpha']
-        if alpha > 0 and self.training:
-            lam = np.random.beta(alpha, alpha)
-            batch_size = x.size(0)
-            index = torch.randperm(batch_size).to(x.device)
-            mixed_x = lam * x + (1 - lam) * x[index]
-            return mixed_x, y, y[index], lam
-        return x, y, None, 1.0
-
     def training_step(self, batch, batch_idx):
         x, y = batch
 
-        # Apply MixUp
-        x, y_a, y_b, lam = self._mixup_batch(x, y)
-        pred = self(x)
-
-        if y_b is not None:
-            # MixUp loss
-            loss_a = F.mse_loss(pred, y_a)
-            loss_b = F.mse_loss(pred, y_b)
-            loss = lam * loss_a + (1 - lam) * loss_b
-        else:
-            # Standard loss with label smoothing
-            label_smoothing = self.config.TRAINING_CONFIG['label_smoothing']
-            if label_smoothing > 0:
-                noise = torch.randn_like(y) * label_smoothing
-                y_smooth = y + noise
-                loss = F.mse_loss(pred, y_smooth)
-            else:
-                loss = F.mse_loss(pred, y)
+        loss = F.mse_loss(pred, y)
 
         # L2 regularisation
         l2_reg = sum(p.pow(2).sum() for p in self.model.parameters())
-        weight_decay = self.config.TRAINING_CONFIG['weight_decay']
-        loss = loss + weight_decay * l2_reg / len(list(self.model.parameters()))
+        weight_decay = self.config.TRAINING_CONFIG['weight_decay'] #FIXME: Move to lower section if not required here re handling
 
         # Log metrics
         true_rmse = torch.sqrt(F.mse_loss(pred, y))
@@ -432,7 +414,7 @@ class OptimalS4DLightning(pl.LightningModule):
         optimizer = torch.optim.AdamW(
             self.parameters(),
             lr=self.config.TRAINING_CONFIG['learning_rate'],
-            weight_decay=0  # We handle weight decay manually
+            weight_decay=0  # We handle weight decay manually FIXME: Double check handling elsewhere or needed here
         )
 
         # Cosine annealing with warm restarts

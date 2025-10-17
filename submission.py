@@ -115,24 +115,15 @@ class OptimizedS4DBlock(nn.Module):
 
 
 class MultiHeadAttentionPooling(nn.Module):
-    """Multi-head Attention Pooling with CLS token"""
+    """Multi-head Attention Pooling"""
 
     def __init__(self, d_model: int = 256, n_heads: int = 8, dropout: float = 0.1):
         super().__init__()
-        self.cls_token = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
         self.attention = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
-        self.norm = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B = x.size(0)
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat([cls_tokens, x], dim=1)
         attn_out, _ = self.attention(x[:, :1, :], x, x)
-        x = attn_out.squeeze(1)
-        x = self.norm(x)
-        x = self.dropout(x)
-        return x
+        return attn_out
 
 
 class OptimizedS4DEEG(nn.Module):
@@ -171,6 +162,9 @@ class OptimizedS4DEEG(nn.Module):
         # Multi-head Attention Pooling
         pool_input_dim = d_model * 2 if bidirectional else d_model
         self.pooling = MultiHeadAttentionPooling(pool_input_dim, n_heads, dropout)
+
+        # FIXME: Add multilayer perceptron for demographic info here, concatenate if with pooling layer to get 1024 
+        # feed that into moe into main head - may need changes to data preprocessing to keep demographics 
 
         # Main head
         self.main_head = nn.Sequential(

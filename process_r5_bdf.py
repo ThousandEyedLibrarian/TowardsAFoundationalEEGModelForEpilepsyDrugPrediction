@@ -31,6 +31,8 @@ from sklearn.model_selection import train_test_split
 warnings.filterwarnings('ignore')
 mne.set_log_level('ERROR')
 
+# FIXME: Add look ahead and back based on data window timestep and find related epochs (5 epochs - 10sec) 
+# these windows are then used to normalise the standard 2 sec epoch
 
 class R5BDFProcessor:
     """
