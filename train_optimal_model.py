@@ -71,7 +71,7 @@ class Config:
         'weight_decay': 0.012,
         'batch_size': 32,
         'max_epochs': 60,  # Increased from 40 for better convergence
-        'patience': 6,
+        'patience': 20,
         'gradient_clip': 0.5
     }
 
