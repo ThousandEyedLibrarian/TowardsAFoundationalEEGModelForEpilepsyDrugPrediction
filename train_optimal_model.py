@@ -62,7 +62,7 @@ class Config:
         'd_state': 384,     # State dimension (4x d_model as recommended)
         'n_heads': 6,       # Attention heads (was 8)
         'bidirectional': True,
-        'dropout': 0.22     # Optimal dropout rate from experiments
+        'dropout': 0.20     # Optimal dropout rate from experiments
     }
 
     # Training Parameters (balanced for stability and performance)
