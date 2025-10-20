@@ -10,6 +10,14 @@ import numpy as np
 import math
 from pathlib import Path
 
+# Import Mixture of Experts module
+try:
+    from fuse_moe import MoE
+    MOE_AVAILABLE = True
+except ImportError:
+    print("[WARNING] fuse_moe module not found, running without MoE")
+    MOE_AVAILABLE = False
+
 
 # ====================================
 # S4D Model Components
@@ -105,12 +113,12 @@ class OptimizedS4DBlock(nn.Module):
         y = self.conv1d(y)
         y = self.glu(y)
         y = y.transpose(1, 2)
-        y = self.norm(y)
 
         if y.shape[-1] == x.shape[-1]:
             y = y + x
 
         y = self.dropout(y)
+        y = self.norm(y)
         return y
 
 
@@ -131,7 +139,8 @@ class OptimizedS4DEEG(nn.Module):
 
     def __init__(self, n_chans: int = 129, n_outputs: int = 1, n_times: int = 200,
                  d_model: int = 128, n_layers: int = 4, d_state: int = 64,
-                 bidirectional: bool = True, n_heads: int = 8, dropout: float = 0.1):
+                 bidirectional: bool = True, n_heads: int = 8, dropout: float = 0.1,
+                 use_moe: bool = True, num_experts: int = 16, k: int = 4):
         super().__init__()
 
         # Input projection
@@ -163,12 +172,25 @@ class OptimizedS4DEEG(nn.Module):
         pool_input_dim = d_model * 2 if bidirectional else d_model
         self.pooling = MultiHeadAttentionPooling(pool_input_dim, n_heads, dropout)
 
-        # FIXME: Add multilayer perceptron for demographic info here, concatenate if with pooling layer to get 1024 
-        # feed that into moe into main head - may need changes to data preprocessing to keep demographics 
+        # Mixture of Experts (if available)
+        self.use_moe = use_moe and MOE_AVAILABLE
+        if self.use_moe:
+            # MoE: input_dim -> hidden_dim -> output_dim (512)
+            self.moe = MoE(
+                total_dim=pool_input_dim,  # Input dimension from pooling
+                hidden_dim=256,             # Hidden dimension for experts
+                out_dim=512,                # Output dimension
+                num_experts=num_experts,
+                k=k,
+                num_modalities=2            # Keep default
+            )
+            head_input_dim = 512  # Output from MoE
+        else:
+            head_input_dim = pool_input_dim
 
         # Main head
         self.main_head = nn.Sequential(
-            nn.Linear(pool_input_dim, 64),
+            nn.Linear(head_input_dim, 64),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(64, n_outputs)
@@ -183,7 +205,7 @@ class OptimizedS4DEEG(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, return_entropy_loss: bool = False):
         # Input: (batch, n_chans=129, n_times=200)
         x = x.transpose(1, 2)  # -> (batch, 200, 129)
         x = self.input_projection(x)  # -> (batch, 200, 128)
@@ -191,8 +213,18 @@ class OptimizedS4DEEG(nn.Module):
         for block in self.s4d_blocks:
             x = block(x)
 
-        x = self.pooling(x)  # -> (batch, 256)
+        x = self.pooling(x)  # -> (batch, 1, 256)
+        x = x.squeeze(1)  # -> (batch, 256)
+
+        # Apply MoE if available
+        entropy_loss = None
+        if self.use_moe:
+            x, entropy_loss = self.moe(x)  # -> (batch, 512), entropy_loss
+
         x = self.main_head(x)  # -> (batch, 1)
+
+        if return_entropy_loss and entropy_loss is not None:
+            return x, entropy_loss
         return x
 
 
@@ -219,14 +251,14 @@ class Submission:
         self.n_chans = 129
         self.n_times = int(2 * SFREQ)  # 2 seconds of data
 
-        # Model configuration (reduced to match training config)
+        # Model configuration (optimized based on experiments)
         self.model_config = {
             'n_chans': self.n_chans,
             'n_outputs': 1,
             'n_times': self.n_times,
             'd_model': 96,   # Reduced from 128
-            'n_layers': 3,   # Reduced from 4
-            'd_state': 48,   # Reduced from 64
+            'n_layers': 4,   # Increased for better capacity
+            'd_state': 384,  # 4x d_model as recommended
             'bidirectional': True,
             'n_heads': 6,    # Reduced from 8
             'dropout': 0.0  # No dropout during inference
