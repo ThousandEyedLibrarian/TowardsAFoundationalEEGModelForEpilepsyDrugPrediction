@@ -11,7 +11,7 @@
 - [ ] Verify data files exist: `r5_l100_full.npz` and `r5_l100_full.pkl`
 
 ### Model Training
-- [ ] Train optimal model: `python train_optimal_model.py --data_path r5_l100_full.npz --epochs 100`
+- [ ] Train optimal model: `python train_optimal_model.py --data-path ./r5_l100_full.npz --epochs 100`
 - [ ] Monitor training progress in `optimal_model_output/logs/`
 - [ ] Check saved checkpoints in `optimal_model_output/checkpoints/`
 

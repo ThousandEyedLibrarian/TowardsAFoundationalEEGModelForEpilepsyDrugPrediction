@@ -40,7 +40,6 @@ warnings.filterwarnings('ignore')
 
 # Import model architectures
 from submission import OptimizedS4DEEG
-from spatial_s4d_improved import SpatialS4DEEG
 
 
 # ==============================================================================
@@ -56,36 +55,22 @@ class Config:
     regularisation, and training stability.
     """
 
-    # Model Architectures
-    # Original S4D Model Configuration (35% smaller than original to prevent overfitting)
-    ORIGINAL_MODEL_CONFIG = {
+    # Model Architecture Configuration (35% smaller than original to prevent overfitting)
+    MODEL_CONFIG = {
         'd_model': 96,      # Hidden dimension (was 128)
-        'n_layers': 3,      # Number of S4D layers (was 4)
-        'd_state': 48,      # State dimension (was 64)
+        'n_layers': 4,      # Number of S4D layers (increased for better capacity) #FIXME: Test 6, 8
+        'd_state': 384,     # State dimension (4x d_model as recommended)
         'n_heads': 6,       # Attention heads (was 8)
         'bidirectional': True,
         'dropout': 0.22     # Optimal dropout rate from experiments
     }
 
-    # Spatial S4D Model Configuration (EEG-specific architecture)
-    SPATIAL_MODEL_CONFIG = {
-        'spatial_filters': 36,  # Spatial feature dimension
-        'd_state': 32,          # State dimension for S4D blocks
-        'n_layers': 2,          # Fewer layers due to better features
-    }
-
-    # Default to original model
-    MODEL_CONFIG = ORIGINAL_MODEL_CONFIG
-    MODEL_TYPE = 'original'  # Will be updated based on command line
-
     # Training Parameters (balanced for stability and performance)
     TRAINING_CONFIG = {
         'learning_rate': 4e-4,
         'weight_decay': 0.012,
-        'label_smoothing': 0.08,
-        'mixup_alpha': 0.15,
         'batch_size': 32,
-        'max_epochs': 40,
+        'max_epochs': 60,  # Increased from 40 for better convergence
         'patience': 6,
         'gradient_clip': 0.5
     }
@@ -172,11 +157,7 @@ class OptimalEEGDataset(Dataset):
                 scale = 0.8 + torch.rand(1) * 0.4  # Scale 0.8-1.2
                 x = x * scale
 
-            # 5. Temporal masking (forces model to use partial information)
-            if torch.rand(1) < 0.3:
-                mask_len = torch.randint(10, 25, (1,)).item()
-                mask_start = torch.randint(0, 200 - mask_len, (1,)).item()
-                x[:, mask_start:mask_start + mask_len] *= 0.1
+            # Temporal masking removed - not necessary with z-score normalization
 
         return x, y
 
@@ -307,8 +288,7 @@ class OptimalS4DLightning(pl.LightningModule):
     PyTorch Lightning module implementing the optimal S4D architecture.
 
     Rationale: This module incorporates all successful training strategies
-    identified through experimentation, including MixUp augmentation,
-    label smoothing, and adaptive learning rate scheduling.
+    identified through experimentation incl. adaptive learning rate scheduling.
     """
 
     def __init__(self, config: Config):
@@ -316,23 +296,14 @@ class OptimalS4DLightning(pl.LightningModule):
         self.save_hyperparameters()
         self.config = config
 
-        # Initialise model based on type
-        if config.MODEL_TYPE == 'spatial':
-            print("\nUsing Spatial S4D Model (EEG-specific architecture)")
-            self.model = SpatialS4DEEG(
-                n_chans=129,
-                n_outputs=1,
-                n_times=200,
-                **config.MODEL_CONFIG
-            )
-        else:  # original
-            print("\nUsing Original Optimised S4D Model")
-            self.model = OptimizedS4DEEG(
-                n_chans=129,
-                n_outputs=1,
-                n_times=200,
-                **config.MODEL_CONFIG
-            )
+        # Initialise model
+        print("\nUsing Optimised S4D Model")
+        self.model = OptimizedS4DEEG(
+            n_chans=129,
+            n_outputs=1,
+            n_times=200,
+            **config.MODEL_CONFIG
+        )
 
         # Track performance metrics
         self.val_rmse_history = []
@@ -341,46 +312,28 @@ class OptimalS4DLightning(pl.LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
 
-    def _mixup_batch(self, x: torch.Tensor, y: torch.Tensor) -> Tuple:
-        """Apply MixUp augmentation to a batch."""
-        alpha = self.config.TRAINING_CONFIG['mixup_alpha']
-        if alpha > 0 and self.training:
-            lam = np.random.beta(alpha, alpha)
-            batch_size = x.size(0)
-            index = torch.randperm(batch_size).to(x.device)
-            mixed_x = lam * x + (1 - lam) * x[index]
-            return mixed_x, y, y[index], lam
-        return x, y, None, 1.0
-
     def training_step(self, batch, batch_idx):
         x, y = batch
 
-        # Apply MixUp
-        x, y_a, y_b, lam = self._mixup_batch(x, y)
-        pred = self(x)
+        # Check if model returns entropy loss (for MoE)
+        result = self.model(x, return_entropy_loss=True) if hasattr(self.model, 'use_moe') else self(x)
 
-        if y_b is not None:
-            # MixUp loss
-            loss_a = F.mse_loss(pred, y_a)
-            loss_b = F.mse_loss(pred, y_b)
-            loss = lam * loss_a + (1 - lam) * loss_b
+        if isinstance(result, tuple):
+            pred, entropy_loss = result
+            # Use Huber loss for robustness to outliers
+            huber_loss = F.huber_loss(pred, y, reduction='mean', delta=1.0)
+            # Combine Huber loss with entropy regularization (weighted at 0.2)
+            loss = huber_loss + 0.2 * entropy_loss
+            self.log('entropy_loss', entropy_loss, prog_bar=False)
         else:
-            # Standard loss with label smoothing
-            label_smoothing = self.config.TRAINING_CONFIG['label_smoothing']
-            if label_smoothing > 0:
-                noise = torch.randn_like(y) * label_smoothing
-                y_smooth = y + noise
-                loss = F.mse_loss(pred, y_smooth)
-            else:
-                loss = F.mse_loss(pred, y)
+            pred = result
+            # Use Huber loss for robustness to outliers
+            loss = F.huber_loss(pred, y, reduction='mean', delta=1.0)
+            huber_loss = loss
 
-        # L2 regularisation
-        l2_reg = sum(p.pow(2).sum() for p in self.model.parameters())
-        weight_decay = self.config.TRAINING_CONFIG['weight_decay']
-        loss = loss + weight_decay * l2_reg / len(list(self.model.parameters()))
-
-        # Log metrics
-        true_rmse = torch.sqrt(F.mse_loss(pred, y))
+        # Log metrics (still compute RMSE for comparison)
+        mse_for_rmse = F.mse_loss(pred, y)
+        true_rmse = torch.sqrt(mse_for_rmse)
         self.log('train_loss', loss, prog_bar=True)
         self.log('train_rmse', true_rmse, prog_bar=True)
         self.train_rmse_history.append(true_rmse.item())
@@ -428,11 +381,11 @@ class OptimalS4DLightning(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        # AdamW optimiser
+        # AdamW optimiser with proper weight decay
         optimizer = torch.optim.AdamW(
             self.parameters(),
             lr=self.config.TRAINING_CONFIG['learning_rate'],
-            weight_decay=0  # We handle weight decay manually
+            weight_decay=self.config.TRAINING_CONFIG['weight_decay']
         )
 
         # Cosine annealing with warm restarts
@@ -703,7 +656,7 @@ def main():
     parser.add_argument(
         '--epochs',
         type=int,
-        default=40,
+        default=60,
         help='Maximum number of training epochs'
     )
     parser.add_argument(
@@ -718,11 +671,16 @@ def main():
         help='Skip submission package creation'
     )
     parser.add_argument(
-        '--model',
-        type=str,
-        choices=['original', 'spatial'],
-        default='original',
-        help='Model architecture to use: original (Optimised S4D) or spatial (Spatial S4D)'
+        '--n-layers',
+        type=int,
+        default=4,
+        choices=[3, 4, 6, 8],
+        help='Number of S4D layers to use'
+    )
+    parser.add_argument(
+        '--no-moe',
+        action='store_true',
+        help='Disable Mixture of Experts module'
     )
 
     args = parser.parse_args()
@@ -732,19 +690,16 @@ def main():
     config.DATA_PATH = args.data_path
     config.TRAINING_CONFIG['max_epochs'] = args.epochs
     config.TRAINING_CONFIG['batch_size'] = args.batch_size
+    config.MODEL_CONFIG['n_layers'] = args.n_layers
+    config.MODEL_CONFIG['use_moe'] = not args.no_moe
 
-    # Set model type and configuration
-    config.MODEL_TYPE = args.model
-    if args.model == 'spatial':
-        config.MODEL_CONFIG = config.SPATIAL_MODEL_CONFIG
-        print("\n" + "="*70)
-        print("SELECTED MODEL: Spatial S4D (EEG-specific architecture)")
-        print("="*70)
-    else:
-        config.MODEL_CONFIG = config.ORIGINAL_MODEL_CONFIG
-        print("\n" + "="*70)
-        print("SELECTED MODEL: Original Optimised S4D")
-        print("="*70)
+    print("\n" + "="*70)
+    print("SELECTED MODEL: Optimised S4D")
+    print(f"  n_layers: {args.n_layers}")
+    print(f"  d_state: {config.MODEL_CONFIG['d_state']}")
+    print(f"  d_model: {config.MODEL_CONFIG['d_model']}")
+    print(f"  MoE: {'Enabled' if not args.no_moe else 'Disabled'}")
+    print("="*70)
 
     # Initialise pipeline
     pipeline = TrainingPipeline(config)
