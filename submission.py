@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import numpy as np
 import math
 from pathlib import Path
+from typing import Optional, Tuple
 
 # Import Mixture of Experts module
 try:
@@ -135,12 +136,34 @@ class MultiHeadAttentionPooling(nn.Module):
 
 
 class OptimizedS4DEEG(nn.Module):
-    """Optimized S4D Model matching architecture diagram"""
+    """
+    Optimized S4D Model for EEG Processing with Optional Demographic Integration
+
+    This model combines S4D blocks with optional Mixture of Experts and demographic processing
+    for improved EEG signal analysis and prediction.
+
+    Args:
+        n_chans: Number of EEG channels (default: 129)
+        n_outputs: Number of output predictions (default: 1)
+        n_times: Number of time points per sample (default: 200)
+        d_model: Model hidden dimension (default: 128)
+        n_layers: Number of S4D layers (default: 4)
+        d_state: State dimension for S4D blocks (default: 64)
+        bidirectional: Whether to use bidirectional S4D (default: True)
+        n_heads: Number of attention heads (default: 8)
+        dropout: Dropout rate (default: 0.1)
+        use_moe: Whether to use Mixture of Experts (default: True)
+        num_experts: Number of experts in MoE (default: 16)
+        k: Number of experts to select (default: 4)
+        use_demographics: Whether to use demographic information (default: False)
+        demographic_dim: Dimension of demographic features (default: 5)
+    """
 
     def __init__(self, n_chans: int = 129, n_outputs: int = 1, n_times: int = 200,
                  d_model: int = 128, n_layers: int = 4, d_state: int = 64,
                  bidirectional: bool = True, n_heads: int = 8, dropout: float = 0.1,
-                 use_moe: bool = True, num_experts: int = 16, k: int = 4):
+                 use_moe: bool = True, num_experts: int = 16, k: int = 4,
+                 use_demographics: bool = False, demographic_dim: int = 5):
         super().__init__()
 
         # Input projection
@@ -172,12 +195,37 @@ class OptimizedS4DEEG(nn.Module):
         pool_input_dim = d_model * 2 if bidirectional else d_model
         self.pooling = MultiHeadAttentionPooling(pool_input_dim, n_heads, dropout)
 
+        # Demographic MLP (optional)
+        self.use_demographics = use_demographics
+        self.demographic_dim = demographic_dim
+
+        if self.use_demographics:
+            # Demographic processing branch
+            self.demographic_mlp = nn.Sequential(
+                nn.Linear(demographic_dim, 64),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.LayerNorm(64),
+                nn.Linear(64, 128),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.LayerNorm(128),
+                nn.Linear(128, 256),
+                nn.ReLU(),
+                nn.LayerNorm(256)
+            )
+            # Fusion dimension: pooled EEG features + demographic features
+            fusion_dim = pool_input_dim + 256
+        else:
+            self.demographic_mlp = None
+            fusion_dim = pool_input_dim
+
         # Mixture of Experts (if available)
         self.use_moe = use_moe and MOE_AVAILABLE
         if self.use_moe:
-            # MoE: input_dim -> hidden_dim -> output_dim (512)
+            # MoE: fusion_dim -> hidden_dim -> output_dim (512)
             self.moe = MoE(
-                total_dim=pool_input_dim,  # Input dimension from pooling
+                total_dim=fusion_dim,       # Input dimension (EEG + demographics if available)
                 hidden_dim=256,             # Hidden dimension for experts
                 out_dim=512,                # Output dimension
                 num_experts=num_experts,
@@ -186,7 +234,7 @@ class OptimizedS4DEEG(nn.Module):
             )
             head_input_dim = 512  # Output from MoE
         else:
-            head_input_dim = pool_input_dim
+            head_input_dim = fusion_dim
 
         # Main head
         self.main_head = nn.Sequential(
@@ -205,23 +253,57 @@ class OptimizedS4DEEG(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
-    def forward(self, x: torch.Tensor, return_entropy_loss: bool = False):
+    def forward(self, x: torch.Tensor, demographics: Optional[torch.Tensor] = None,
+                return_entropy_loss: bool = False):
+        """
+        Forward pass through the model.
+
+        Args:
+            x: EEG data tensor of shape (batch, n_chans, n_times)
+            demographics: Optional demographic features of shape (batch, demographic_dim)
+            return_entropy_loss: Whether to return MoE entropy loss for regularization
+
+        Returns:
+            predictions: Output predictions of shape (batch, n_outputs)
+            entropy_loss: (Optional) MoE entropy loss if return_entropy_loss is True
+        """
+        # Process EEG data
         # Input: (batch, n_chans=129, n_times=200)
         x = x.transpose(1, 2)  # -> (batch, 200, 129)
         x = self.input_projection(x)  # -> (batch, 200, 128)
 
+        # Apply S4D blocks
         for block in self.s4d_blocks:
             x = block(x)
 
-        x = self.pooling(x)  # -> (batch, 1, 256)
-        x = x.squeeze(1)  # -> (batch, 256)
+        # Pool temporal features
+        x = self.pooling(x)  # -> (batch, 1, pool_input_dim)
+        x = x.squeeze(1)  # -> (batch, pool_input_dim)
+
+        # Process and fuse demographic features if available
+        if self.use_demographics and demographics is not None:
+            if demographics.dim() == 1:
+                demographics = demographics.unsqueeze(0)  # Ensure batch dimension
+
+            # Process demographics through MLP
+            demo_features = self.demographic_mlp(demographics)  # -> (batch, 256)
+
+            # Concatenate EEG and demographic features
+            x = torch.cat([x, demo_features], dim=-1)  # -> (batch, fusion_dim)
+        elif self.use_demographics and demographics is None:
+            # If demographics expected but not provided, use zeros
+            batch_size = x.shape[0]
+            demo_zeros = torch.zeros(batch_size, self.demographic_dim, device=x.device)
+            demo_features = self.demographic_mlp(demo_zeros)
+            x = torch.cat([x, demo_features], dim=-1)
 
         # Apply MoE if available
         entropy_loss = None
         if self.use_moe:
             x, entropy_loss = self.moe(x)  # -> (batch, 512), entropy_loss
 
-        x = self.main_head(x)  # -> (batch, 1)
+        # Final prediction
+        x = self.main_head(x)  # -> (batch, n_outputs)
 
         if return_entropy_loss and entropy_loss is not None:
             return x, entropy_loss

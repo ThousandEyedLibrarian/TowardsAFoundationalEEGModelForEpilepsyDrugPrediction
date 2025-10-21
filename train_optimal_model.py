@@ -24,7 +24,7 @@ import argparse
 import warnings
 from pathlib import Path
 from datetime import datetime
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any, Union
 
 import torch
 import torch.nn as nn
@@ -62,7 +62,9 @@ class Config:
         'd_state': 384,     # State dimension (4x d_model as recommended)
         'n_heads': 6,       # Attention heads (was 8)
         'bidirectional': True,
-        'dropout': 0.20     # Optimal dropout rate from experiments
+        'dropout': 0.20,    # Optimal dropout rate from experiments
+        'use_demographics': False,  # Enable when demographic data is available
+        'demographic_dim': 5  # Expected dimension of demographic features
     }
 
     # Training Parameters (balanced for stability and performance)
@@ -102,17 +104,20 @@ class OptimalEEGDataset(Dataset):
     provide sufficient regularisation without destabilising training.
     """
 
-    def __init__(self, X: np.ndarray, y: np.ndarray, augment: bool = False):
+    def __init__(self, X: np.ndarray, y: np.ndarray, demographics: Optional[np.ndarray] = None,
+                 augment: bool = False):
         """
         Initialise the dataset.
 
         Args:
             X: EEG data of shape (n_samples, 129, 200)
             y: Response times of shape (n_samples, 1)
+            demographics: Optional demographic features of shape (n_samples, demographic_dim)
             augment: Whether to apply data augmentation
         """
         self.X = torch.FloatTensor(X)
         self.y = torch.FloatTensor(y)
+        self.demographics = torch.FloatTensor(demographics) if demographics is not None else None
         self.augment = augment
 
         # Robust normalisation using median and standard deviation
@@ -123,9 +128,11 @@ class OptimalEEGDataset(Dataset):
     def __len__(self) -> int:
         return len(self.X)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Union[Tuple[torch.Tensor, torch.Tensor],
+                                              Tuple[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]]:
         x = self.X[idx].clone()
         y = self.y[idx].clone()
+        demographics = self.demographics[idx].clone() if self.demographics is not None else None
 
         # Normalise channels
         x = (x - self.median.unsqueeze(-1)) / self.std.unsqueeze(-1)
@@ -159,6 +166,9 @@ class OptimalEEGDataset(Dataset):
 
             # Temporal masking removed - not necessary with z-score normalization
 
+        # Return demographics if available
+        if demographics is not None:
+            return (x, demographics), y
         return x, y
 
 
@@ -313,10 +323,20 @@ class OptimalS4DLightning(pl.LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
+        # Handle batches with or without demographics
+        if len(batch) == 2 and isinstance(batch[0], tuple):
+            # Batch contains demographics: ((x, demographics), y)
+            (x, demographics), y = batch
+        else:
+            # Standard batch: (x, y)
+            x, y = batch
+            demographics = None
 
         # Check if model returns entropy loss (for MoE)
-        result = self.model(x, return_entropy_loss=True) if hasattr(self.model, 'use_moe') else self(x)
+        if hasattr(self.model, 'use_demographics') and self.model.use_demographics and demographics is not None:
+            result = self.model(x, demographics=demographics, return_entropy_loss=True)
+        else:
+            result = self.model(x, return_entropy_loss=True) if hasattr(self.model, 'use_moe') else self(x)
 
         if isinstance(result, tuple):
             pred, entropy_loss = result
@@ -341,8 +361,18 @@ class OptimalS4DLightning(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
-        pred = self(x)
+        # Handle batches with or without demographics
+        if len(batch) == 2 and isinstance(batch[0], tuple):
+            (x, demographics), y = batch
+        else:
+            x, y = batch
+            demographics = None
+
+        # Make prediction
+        if hasattr(self.model, 'use_demographics') and self.model.use_demographics and demographics is not None:
+            pred = self.model(x, demographics=demographics)
+        else:
+            pred = self(x)
         loss = F.mse_loss(pred, y)
         rmse = torch.sqrt(loss)
 
@@ -353,23 +383,35 @@ class OptimalS4DLightning(pl.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        x, y = batch
+        # Handle batches with or without demographics
+        if len(batch) == 2 and isinstance(batch[0], tuple):
+            (x, demographics), y = batch
+        else:
+            x, y = batch
+            demographics = None
 
         # Test-Time Augmentation (TTA)
         preds = []
 
+        # Helper function for predictions
+        def make_pred(x_input):
+            if hasattr(self.model, 'use_demographics') and self.model.use_demographics and demographics is not None:
+                return self.model(x_input, demographics=demographics)
+            else:
+                return self(x_input)
+
         # Original prediction
-        preds.append(self(x))
+        preds.append(make_pred(x))
 
         # Light noise augmentations
         for noise_level in [0.003, 0.005]:
             x_aug = x + torch.randn_like(x) * noise_level
-            preds.append(self(x_aug))
+            preds.append(make_pred(x_aug))
 
         # Light amplitude scaling
         for scale in [0.97, 1.03]:
             x_aug = x * scale
-            preds.append(self(x_aug))
+            preds.append(make_pred(x_aug))
 
         # Average predictions
         pred = torch.stack(preds).mean(dim=0)
