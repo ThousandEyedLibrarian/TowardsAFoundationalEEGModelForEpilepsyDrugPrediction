@@ -390,31 +390,13 @@ class OptimalS4DLightning(pl.LightningModule):
             x, y = batch
             demographics = None
 
-        # Test-Time Augmentation (TTA)
-        preds = []
+        # Make prediction without any augmentation (test should use clean data)
+        if hasattr(self.model, 'use_demographics') and self.model.use_demographics and demographics is not None:
+            pred = self.model(x, demographics=demographics)
+        else:
+            pred = self(x)
 
-        # Helper function for predictions
-        def make_pred(x_input):
-            if hasattr(self.model, 'use_demographics') and self.model.use_demographics and demographics is not None:
-                return self.model(x_input, demographics=demographics)
-            else:
-                return self(x_input)
-
-        # Original prediction
-        preds.append(make_pred(x))
-
-        # Light noise augmentations
-        for noise_level in [0.003, 0.005]:
-            x_aug = x + torch.randn_like(x) * noise_level
-            preds.append(make_pred(x_aug))
-
-        # Light amplitude scaling
-        for scale in [0.97, 1.03]:
-            x_aug = x * scale
-            preds.append(make_pred(x_aug))
-
-        # Average predictions
-        pred = torch.stack(preds).mean(dim=0)
+        # Calculate loss
         loss = F.mse_loss(pred, y)
 
         self.log('test_loss', loss)

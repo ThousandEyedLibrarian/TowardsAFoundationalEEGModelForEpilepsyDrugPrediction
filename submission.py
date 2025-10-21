@@ -236,12 +236,12 @@ class OptimizedS4DEEG(nn.Module):
         else:
             head_input_dim = fusion_dim
 
-        # Main head
+        # Main head with increased hidden units (512)
         self.main_head = nn.Sequential(
-            nn.Linear(head_input_dim, 64),
+            nn.Linear(head_input_dim, 512),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(64, n_outputs)
+            nn.Linear(512, n_outputs)
         )
 
         self._init_weights()
