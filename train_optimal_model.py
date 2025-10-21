@@ -724,6 +724,17 @@ def main():
         action='store_true',
         help='Disable Mixture of Experts module'
     )
+    parser.add_argument(
+        '--use-demographics',
+        action='store_true',
+        help='Enable demographic MLP branch (requires demographic data)'
+    )
+    parser.add_argument(
+        '--demographic-dim',
+        type=int,
+        default=5,
+        help='Dimension of demographic features (default: 5)'
+    )
 
     args = parser.parse_args()
 
@@ -734,6 +745,8 @@ def main():
     config.TRAINING_CONFIG['batch_size'] = args.batch_size
     config.MODEL_CONFIG['n_layers'] = args.n_layers
     config.MODEL_CONFIG['use_moe'] = not args.no_moe
+    config.MODEL_CONFIG['use_demographics'] = args.use_demographics
+    config.MODEL_CONFIG['demographic_dim'] = args.demographic_dim
 
     print("\n" + "="*70)
     print("SELECTED MODEL: Optimised S4D")
@@ -741,6 +754,9 @@ def main():
     print(f"  d_state: {config.MODEL_CONFIG['d_state']}")
     print(f"  d_model: {config.MODEL_CONFIG['d_model']}")
     print(f"  MoE: {'Enabled' if not args.no_moe else 'Disabled'}")
+    print(f"  Demographics: {'Enabled' if args.use_demographics else 'Disabled'}")
+    if args.use_demographics:
+        print(f"  Demographic dim: {args.demographic_dim}")
     print("="*70)
 
     # Initialise pipeline
