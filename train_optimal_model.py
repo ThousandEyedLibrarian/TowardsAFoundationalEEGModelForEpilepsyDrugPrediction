@@ -48,13 +48,9 @@ from submission import OptimizedS4DEEG
 class Config:
     """
     Central configuration for the training pipeline.
-
-    Rationale: These hyperparameters were determined through extensive
-    experimentation and represent the optimal balance between model capacity,
-    regularisation, and training stability.
     """
 
-    # Model Architecture Configuration (35% smaller than original to prevent overfitting)
+    # Model Architecture Configuration
     MODEL_CONFIG = {
         'd_model': 96,      # Hidden dimension (was 128)
         'n_layers': 8,      # Number of S4D layers (increased for better capacity)
@@ -66,7 +62,7 @@ class Config:
         'demographic_dim': 5,  # Expected dimension of demographic features
 
         # Moving Z-Score Normalization
-        'use_moving_zscore': False,  # Enable moving z-score normalization
+        'use_moving_zscore': True,  # Enable moving z-score normalization
         'zscore_window_size': 50,    # Window size in samples (0.5s at 100Hz)
         'zscore_window_type': 'center',  # 'center', 'causal', or 'backward'
         'zscore_use_median': False   # Use median instead of mean (more robust)
