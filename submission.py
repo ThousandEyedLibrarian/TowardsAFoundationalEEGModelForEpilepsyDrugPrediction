@@ -11,6 +11,46 @@ import math
 from pathlib import Path
 from typing import Optional, Tuple
 
+
+def resolve_path(name: str) -> Path:
+    """
+    Helper function to resolve model weight paths for final phase.
+
+    Checks multiple directories in order:
+    1. /app/input/res/{name} (competition evaluation environment)
+    2. /app/input/{name} (competition evaluation environment)
+    3. Current directory (local testing)
+    4. Script's parent directory (local testing)
+
+    Args:
+        name: Filename of the weights (e.g., 'weights_challenge_1.pt')
+
+    Returns:
+        Path to the weights file
+
+    Raises:
+        FileNotFoundError: If weights file not found in any location
+    """
+    # Possible directories to check (in order of priority)
+    dirs = [
+        Path("/app/input/res"),      # Competition environment (preferred)
+        Path("/app/input"),           # Competition environment (fallback)
+        Path.cwd(),                   # Current directory (local testing)
+        Path(__file__).parent,        # Script's parent directory (local testing)
+    ]
+
+    for d in dirs:
+        path = d / name
+        if path.exists():
+            return path
+
+    # If not found, raise informative error
+    raise FileNotFoundError(
+        f"Could not find {name} in any of the following locations:\n" +
+        "\n".join(f"  - {d}" for d in dirs)
+    )
+
+
 # Import Mixture of Experts module
 try:
     from fuse_moe import MoE
@@ -339,7 +379,7 @@ class Submission:
             'n_outputs': 1,
             'n_times': self.n_times,
             'd_model': 96,   # Reduced from 128
-            'n_layers': 4,   # Increased for better capacity
+            'n_layers': 8,   # Increased for better capacity
             'd_state': 384,  # 4x d_model as recommended
             'bidirectional': True,
             'n_heads': 6,    # Reduced from 8
@@ -356,19 +396,19 @@ class Submission:
         # Create model
         model = OptimizedS4DEEG(**self.model_config).to(self.device)
 
-        # Load weights if available
-        weights_path = "/app/output/weights_challenge_1.pt"
-        if Path(weights_path).exists():
-            try:
-                # PyTorch 2.6 compatibility: explicitly set weights_only=False
-                state_dict = torch.load(weights_path, map_location=self.device, weights_only=False)
-                model.load_state_dict(state_dict, strict=False)
-                print(f"[SUCCESS] Loaded weights for Challenge 1 from {weights_path}")
-            except Exception as e:
-                print(f"[WARNING] Could not load weights for Challenge 1: {e}")
-                print("   Using random initialization")
-        else:
-            print(f"[WARNING] No weights found at {weights_path}, using random initialization")
+        # Load weights using resolve_path helper for final phase compatibility
+        try:
+            weights_path = resolve_path("weights_challenge_1.pt")
+            # PyTorch 2.6 compatibility: explicitly set weights_only=False
+            state_dict = torch.load(weights_path, map_location=self.device, weights_only=False)
+            model.load_state_dict(state_dict, strict=False)
+            print(f"[SUCCESS] Loaded weights for Challenge 1 from {weights_path}")
+        except FileNotFoundError as e:
+            print(f"[WARNING] {e}")
+            print("   Using random initialization")
+        except Exception as e:
+            print(f"[WARNING] Could not load weights for Challenge 1: {e}")
+            print("   Using random initialization")
 
         # Set to evaluation mode
         model.eval()
@@ -384,19 +424,19 @@ class Submission:
         # Create model (same architecture as Challenge 1)
         model = OptimizedS4DEEG(**self.model_config).to(self.device)
 
-        # Load weights if available
-        weights_path = "/app/output/weights_challenge_2.pt"
-        if Path(weights_path).exists():
-            try:
-                # PyTorch 2.6 compatibility: explicitly set weights_only=False
-                state_dict = torch.load(weights_path, map_location=self.device, weights_only=False)
-                model.load_state_dict(state_dict, strict=False)
-                print(f"[SUCCESS] Loaded weights for Challenge 2 from {weights_path}")
-            except Exception as e:
-                print(f"[WARNING] Could not load weights for Challenge 2: {e}")
-                print("   Using random initialization")
-        else:
-            print(f"[WARNING] No weights found at {weights_path}, using random initialization")
+        # Load weights using resolve_path helper for final phase compatibility
+        try:
+            weights_path = resolve_path("weights_challenge_2.pt")
+            # PyTorch 2.6 compatibility: explicitly set weights_only=False
+            state_dict = torch.load(weights_path, map_location=self.device, weights_only=False)
+            model.load_state_dict(state_dict, strict=False)
+            print(f"[SUCCESS] Loaded weights for Challenge 2 from {weights_path}")
+        except FileNotFoundError as e:
+            print(f"[WARNING] {e}")
+            print("   Using random initialization")
+        except Exception as e:
+            print(f"[WARNING] Could not load weights for Challenge 2: {e}")
+            print("   Using random initialization")
 
         # Set to evaluation mode
         model.eval()
