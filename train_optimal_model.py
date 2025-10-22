@@ -450,11 +450,19 @@ class OptimalS4DLightning(pl.LightningModule):
 
         # Initialise model
         print("\nUsing Optimised S4D Model")
+
+        # Filter out dataset-specific parameters (normalization config)
+        model_params = {
+            k: v for k, v in config.MODEL_CONFIG.items()
+            if k not in ['use_moving_zscore', 'zscore_window_size',
+                         'zscore_window_type', 'zscore_use_median']
+        }
+
         self.model = OptimizedS4DEEG(
             n_chans=129,
             n_outputs=1,
             n_times=200,
-            **config.MODEL_CONFIG
+            **model_params
         )
 
         # Track performance metrics
