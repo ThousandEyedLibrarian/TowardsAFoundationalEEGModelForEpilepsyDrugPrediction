@@ -478,6 +478,10 @@ class OptimalS4DLightning(pl.LightningModule):
             x, y = batch
             demographics = None
 
+        # Update MoE temperature if model uses MoE
+        if hasattr(self.model, 'use_moe') and self.model.use_moe and hasattr(self.model, 'moe'):
+            self.model.moe.update_temperature(self.global_step)
+
         # Check if model returns entropy loss (for MoE)
         if hasattr(self.model, 'use_demographics') and self.model.use_demographics and demographics is not None:
             result = self.model(x, demographics=demographics, return_entropy_loss=True)
@@ -488,9 +492,12 @@ class OptimalS4DLightning(pl.LightningModule):
             pred, entropy_loss = result
             # Use Huber loss for robustness to outliers
             huber_loss = F.huber_loss(pred, y, reduction='mean', delta=1.0)
-            # Combine Huber loss with entropy regularization (weighted at 0.2)
-            loss = huber_loss + 0.2 * entropy_loss
+            # Combine Huber loss with entropy regularization (weighted at 0.01 for stability)
+            loss = huber_loss + 0.01 * entropy_loss
             self.log('entropy_loss', entropy_loss, prog_bar=False)
+            # Log current MoE temperature
+            if hasattr(self.model, 'moe') and hasattr(self.model.moe, 'current_temperature'):
+                self.log('moe_temperature', self.model.moe.current_temperature, prog_bar=False)
         else:
             pred = result
             # Use Huber loss for robustness to outliers

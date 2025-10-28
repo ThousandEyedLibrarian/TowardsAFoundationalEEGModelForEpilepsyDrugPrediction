@@ -8,7 +8,6 @@ from scipy.signal import resample_poly, sosfilt, butter, iirnotch, lfilter
 from multiprocessing import Pool
 import os
 from collections import deque
-from ml_utils.data_generator import helpers
 import zarr
 from numcodecs import Blosc
 from meegkit import dss
@@ -253,10 +252,6 @@ def zscore_epochs_buffered(
     cropped_start, cropped_end = random_interval(
         start, n_samples, min(3600 * sfreq, n_samples - start)
     )
-
-    clean_ch_names = [
-        helpers.is_channel_in_list(ch, raw.ch_names) for ch in EEG_CHANNELS
-    ]
 
     # Initialize buffers for each window size
     max_w_samples = max(window_sizes_sec) * sfreq

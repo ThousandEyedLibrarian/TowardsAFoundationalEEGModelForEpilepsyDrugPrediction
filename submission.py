@@ -265,12 +265,14 @@ class OptimizedS4DEEG(nn.Module):
         if self.use_moe:
             # MoE: fusion_dim -> hidden_dim -> output_dim (512)
             self.moe = MoE(
-                total_dim=fusion_dim,       # Input dimension (EEG + demographics if available)
+                input_dim=fusion_dim,       # Input dimension (EEG + demographics if available)
                 hidden_dim=256,             # Hidden dimension for experts
                 out_dim=512,                # Output dimension
                 num_experts=num_experts,
                 k=k,
-                num_modalities=2            # Keep default
+                max_temperature=2.0,        # Start with higher temperature for exploration
+                min_temperature=0.5,        # End with lower temperature for deterministic experts
+                temperature_decay=0.999995  # Slow decay for stable training
             )
             head_input_dim = 512  # Output from MoE
         else:
