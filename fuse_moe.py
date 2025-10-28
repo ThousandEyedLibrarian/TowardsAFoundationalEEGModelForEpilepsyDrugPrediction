@@ -42,27 +42,39 @@ def moe_entropy_loss(router_logits, reduction="batchmean"):
         return ent_loss  # [B]
 
 
-def laplace_gating_with_probs_timewise(x, router_embedding, k, temperature=0.5):
+def laplace_gating_with_probs(x, router_embedding, k, temperature=0.5):
     """
-    Laplace gating per timestep with per-token router embeddings.
+    Laplace gating with per-token router embeddings.
 
     Args:
-        x: [B, T, D]
-        router_embedding: [B, T, E, D] - one embedding per token per expert
+        x: [B, D] or [B, T, D]
+        router_embedding: [B, E, D] or [B, T, E, D] - one embedding per token per expert
         k: int - top-k experts
 
     Returns:
-        topk_indices: [B, T, k]
-        topk_probs: [B, T, k]
+        topk_indices: [B, k] or [B, T, k]
+        topk_probs: [B, k] or [B, T, k]
     """
-    x_exp = x.unsqueeze(2)  # [B, T, 1, D]
-    distances = torch.linalg.vector_norm(
-        x_exp - router_embedding, dim=-1, ord=2
-    )  # [B, T, E]
-    distances = torch.exp(-distances / temperature)
+    if x.dim() == 2:
+        # Handle 2D input [B, D]
+        x_exp = x.unsqueeze(1)  # [B, 1, D]
+        distances = torch.linalg.vector_norm(
+            x_exp - router_embedding, dim=-1, ord=2
+        )  # [B, E]
+        distances = torch.exp(-distances / temperature)
 
-    topk_scores, topk_indices = torch.topk(-distances, k, dim=-1)  # [B, T, k]
-    topk_probs = topk_scores / torch.sum(topk_scores, dim=-1, keepdim=True)  # [B, T, k]
+        topk_scores, topk_indices = torch.topk(-distances, k, dim=-1)  # [B, k]
+        topk_probs = topk_scores / torch.sum(topk_scores, dim=-1, keepdim=True)  # [B, k]
+    else:
+        # Handle 3D input [B, T, D]
+        x_exp = x.unsqueeze(2)  # [B, T, 1, D]
+        distances = torch.linalg.vector_norm(
+            x_exp - router_embedding, dim=-1, ord=2
+        )  # [B, T, E]
+        distances = torch.exp(-distances / temperature)
+
+        topk_scores, topk_indices = torch.topk(-distances, k, dim=-1)  # [B, T, k]
+        topk_probs = topk_scores / torch.sum(topk_scores, dim=-1, keepdim=True)  # [B, T, k]
 
     return topk_indices, topk_probs
 
@@ -76,11 +88,20 @@ class Router(nn.Module):
         self.router = nn.Linear(hidden_dim, hidden_dim)
 
     def forward(self, x):
-        x = self.map_num_experts(x)
-        x = torch.reshape(
-            x, (x.shape[0], x.shape[1], self.num_experts, self.hidden_dim)
-        )
-        x = self.router(x)
+        if x.dim() == 2:
+            # Handle 2D input [B, D]
+            x = self.map_num_experts(x)  # [B, D*E]
+            x = torch.reshape(
+                x, (x.shape[0], self.num_experts, self.hidden_dim)
+            )  # [B, E, D]
+            x = self.router(x)  # [B, E, D]
+        else:
+            # Handle 3D input [B, T, D]
+            x = self.map_num_experts(x)  # [B, T, D*E]
+            x = torch.reshape(
+                x, (x.shape[0], x.shape[1], self.num_experts, self.hidden_dim)
+            )  # [B, T, E, D]
+            x = self.router(x)  # [B, T, E, D]
         return x
 
 
@@ -148,56 +169,96 @@ class MoE(nn.Module):
 
     def apply_topk_experts(self, x, experts, topk_indices, topk_probs):
         """
-        Apply top-k experts to each timestep token and combine outputs.
+        Apply top-k experts to each token and combine outputs.
 
         Args:
-            x: [B, T, D] input features
+            x: [B, D] or [B, T, D] input features
             experts: list or nn.ModuleList of expert networks, each [N, D] -> [N, M]
-            topk_indices: [B, T, k] indices of selected experts
-            topk_probs: [B, T, k] softmax-normalised gating weights
+            topk_indices: [B, k] or [B, T, k] indices of selected experts
+            topk_probs: [B, k] or [B, T, k] softmax-normalised gating weights
 
         Returns:
-            combined_output: [B, T, M]
+            combined_output: [B, M] or [B, T, M]
         """
-        B, T, D = x.shape
         k = topk_indices.size(-1)
         M = self.hidden_dim  # assume all experts output same dimension
 
-        # Flatten batch and time for token-level processing
-        x_flat = x.view(B * T, D)  # [B*T, D]
-        topk_idx_flat = topk_indices.view(B * T * k)  # [B*T*k]
-        topk_prob_flat = topk_probs.view(B * T * k)  # [B*T*k]
+        if x.dim() == 2:
+            # Handle 2D input [B, D]
+            B, D = x.shape
 
-        # Repeat input for each top-k assignment
-        x_repeat = (
-            x_flat.unsqueeze(1).expand(-1, k, -1).contiguous().view(B * T * k, D)
-        )  # [B*T*k, D]
+            # Flatten for processing
+            topk_idx_flat = topk_indices.view(B * k)  # [B*k]
+            topk_prob_flat = topk_probs.view(B * k)  # [B*k]
 
-        # Precompute token ids (original token for each top-k assignment)
-        token_ids = (
-            torch.arange(B * T, device=x.device).unsqueeze(1).expand(-1, k).reshape(-1)
-        )  # [B*T*k]
+            # Repeat input for each top-k assignment
+            x_repeat = (
+                x.unsqueeze(1).expand(-1, k, -1).contiguous().view(B * k, D)
+            )  # [B*k, D]
 
-        # Output buffer
-        combined_flat = torch.zeros(B * T, M, device=x.device, dtype=x.dtype)
+            # Precompute token ids
+            token_ids = (
+                torch.arange(B, device=x.device).unsqueeze(1).expand(-1, k).reshape(-1)
+            )  # [B*k]
 
-        # Dispatch per expert
-        for e, expert in enumerate(experts):
-            mask = topk_idx_flat == e  # [B*T*k]
-            if not mask.any():
-                continue
+            # Output buffer
+            combined_flat = torch.zeros(B, M, device=x.device, dtype=x.dtype)
 
-            x_e = x_repeat[mask]  # [N_assign, D]
-            w_e = topk_prob_flat[mask].unsqueeze(-1)  # [N_assign, 1]
-            y_e = expert(x_e)  # [N_assign, M]
-            weighted_y = y_e * w_e  # [N_assign, M]
+            # Dispatch per expert
+            for e, expert in enumerate(experts):
+                mask = topk_idx_flat == e  # [B*k]
+                if not mask.any():
+                    continue
 
-            # Scatter-add to original tokens
-            combined_flat.index_add_(0, token_ids[mask], weighted_y)
+                x_e = x_repeat[mask]  # [N_assign, D]
+                w_e = topk_prob_flat[mask].unsqueeze(-1)  # [N_assign, 1]
+                y_e = expert(x_e)  # [N_assign, M]
+                weighted_y = y_e * w_e  # [N_assign, M]
 
-        # Reshape back to [B, T, M]
-        combined = combined_flat.view(B, T, M)
-        return combined
+                # Scatter-add to original tokens
+                combined_flat.index_add_(0, token_ids[mask], weighted_y)
+
+            return combined_flat  # [B, M]
+
+        else:
+            # Handle 3D input [B, T, D]
+            B, T, D = x.shape
+
+            # Flatten batch and time for token-level processing
+            x_flat = x.view(B * T, D)  # [B*T, D]
+            topk_idx_flat = topk_indices.view(B * T * k)  # [B*T*k]
+            topk_prob_flat = topk_probs.view(B * T * k)  # [B*T*k]
+
+            # Repeat input for each top-k assignment
+            x_repeat = (
+                x_flat.unsqueeze(1).expand(-1, k, -1).contiguous().view(B * T * k, D)
+            )  # [B*T*k, D]
+
+            # Precompute token ids (original token for each top-k assignment)
+            token_ids = (
+                torch.arange(B * T, device=x.device).unsqueeze(1).expand(-1, k).reshape(-1)
+            )  # [B*T*k]
+
+            # Output buffer
+            combined_flat = torch.zeros(B * T, M, device=x.device, dtype=x.dtype)
+
+            # Dispatch per expert
+            for e, expert in enumerate(experts):
+                mask = topk_idx_flat == e  # [B*T*k]
+                if not mask.any():
+                    continue
+
+                x_e = x_repeat[mask]  # [N_assign, D]
+                w_e = topk_prob_flat[mask].unsqueeze(-1)  # [N_assign, 1]
+                y_e = expert(x_e)  # [N_assign, M]
+                weighted_y = y_e * w_e  # [N_assign, M]
+
+                # Scatter-add to original tokens
+                combined_flat.index_add_(0, token_ids[mask], weighted_y)
+
+            # Reshape back to [B, T, M]
+            combined = combined_flat.view(B, T, M)
+            return combined
 
     def update_temperature(self, global_step):
         self.current_temperature = np.max(
@@ -209,7 +270,7 @@ class MoE(nn.Module):
 
     def forward(self, x):
         router_embeddings = self.router(x)
-        topk_indices, topk_scores = laplace_gating_with_probs_timewise(
+        topk_indices, topk_scores = laplace_gating_with_probs(
             x, router_embeddings, self.k, self.current_temperature
         )
 
@@ -218,6 +279,14 @@ class MoE(nn.Module):
         )
 
         outs = self.out_linear(expert_embeddings)
-        ent_loss = self.experts_running_marginal.compute_mi_loss(topk_scores)["mi_loss"]
+
+        # Handle entropy loss computation based on input dimension
+        if topk_scores.dim() == 2:
+            # For 2D case, add time dimension for MI loss computation
+            topk_scores_for_mi = topk_scores.unsqueeze(1)  # [B, 1, k]
+        else:
+            topk_scores_for_mi = topk_scores
+
+        ent_loss = self.experts_running_marginal.compute_mi_loss(topk_scores_for_mi)["mi_loss"]
 
         return outs, ent_loss
